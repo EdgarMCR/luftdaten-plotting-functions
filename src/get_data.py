@@ -11,11 +11,11 @@ import urllib.request
 
 
 def maybe_get_list_of_sensors():
-    today = datetime.datetime.today()
-    save_name = os.path.join('../data/data-%s.json.gz' % today.strftime('%Y%m%d'))
+    midnight = datetime.datetime.combine(datetime.datetime.today(), datetime.datetime.min.time())
+    save_name = os.path.join('../data/data-%s.json.gz' % midnight.strftime('%Y%m%d'))
 
     if os.path.exists(save_name):
-        print("%s exists" % save_name)
+        logging.debug("%s exists, loading from file" % save_name)
         with gzip.open(save_name, 'r') as f:
             data = f.read()
     else:
@@ -29,17 +29,29 @@ def maybe_get_list_of_sensors():
         listing = glob.glob('../data/data-*.json.gz')
         for file in listing:
             date = datetime.datetime.strptime(file, '../data/data-%Y%m%d.json.gz')
-            if date < today:
+            if date < midnight:
                 try:
+                    logging.debug("Removing old data.json file %s" % file)
                     os.remove(file)
                 except Exception as err:
                     logging.warn("Failed to delete old file %s with error %s" % (file, str(err)))
 
-    return json.loads(data)
+    data = json.loads(data)
+    return data
+
+
+def convert_json_data_to_df(data):
+    """ Convert the JSON to a dataframe. For now, do this in an inefficient way but easy to code. """
+    dict_of_columns = {}
+    for d in data:
+        pass
 
 
 def main():
-    maybe_get_list_of_sensors()
+    logging.basicConfig(level=logging.DEBUG)
+    data = maybe_get_list_of_sensors()
+    print(type(data))
+    print(data[0])
 
 
 if __name__ == '__main__':
