@@ -46,6 +46,17 @@ def convert_json_data_to_df(data):
     for d in data:
         pass
 
+def get_manchester_council_data():
+    """ Function that downloads the data from Manchester measuring stations """
+    'https://www.airqualityengland.co.uk/site/data.php?site_id=TRAF&parameter_id%5B%5D=NO&parameter_id%5B%5D=NO2&parameter_id%5B%5D=NOXasNO2&parameter_id%5B%5D=GE10&parameter_id%5B%5D=SO2&f_query_id=1061759&data=%3C%3Fphp+print+htmlentities%28%24data%29%3B+%3F%3E&f_date_started=2019-01-01&f_date_ended=2019-05-01&la_id=368&action=download&submit=Download+Data'
+
+    # csv download
+    # Generate file specifically for request - thats a bit disappointing
+    'https://www.airqualityengland.co.uk/assets/downloads/2019-01-01-190501090739.csv'
+
+    # better use this service
+    'https://uk-air.defra.gov.uk/data/flat_files?site_id=MAN3' # piccadily
+
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
