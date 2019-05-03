@@ -8,11 +8,12 @@ import gzip
 import glob
 
 import urllib.request
+import requests
 
-
+data_folder = '../data/'
 def maybe_get_list_of_sensors():
     midnight = datetime.datetime.combine(datetime.datetime.today(), datetime.datetime.min.time())
-    save_name = os.path.join('../data/data-%s.json.gz' % midnight.strftime('%Y%m%d'))
+    save_name = os.path.join(data_folder, 'data-%s.json.gz' % midnight.strftime('%Y%m%d'))
 
     if os.path.exists(save_name):
         logging.debug("%s exists, loading from file" % save_name)
@@ -26,9 +27,9 @@ def maybe_get_list_of_sensors():
             f.write(data)
 
         # Delete old files
-        listing = glob.glob('../data/data-*.json.gz')
+        listing = glob.glob(os.path.join(data_folder, 'data-*.json.gz'))
         for file in listing:
-            date = datetime.datetime.strptime(file, '../data/data-%Y%m%d.json.gz')
+            date = datetime.datetime.strptime(file, data_folder + 'data-%Y%m%d.json.gz')
             if date < midnight:
                 try:
                     logging.debug("Removing old data.json file %s" % file)
@@ -46,23 +47,63 @@ def convert_json_data_to_df(data):
     for d in data:
         pass
 
+
+def get_data_from_air_quality_england(sensor_names_and_parameters, start_date, end_date):
+    with requests.Session() as s:
+        site_id = 'MAN1'
+        parameters = 'parameter_id[]=NO&parameter_id[]=NO2&parameter_id[]=NOXasNO2&parameter_id[]=GE10'
+        date_started = '2019-04-30'
+        date_ended = '2019-05-02'
+        request_url = f'https://www.airqualityengland.co.uk/site/data.php?site_id={site_id}&{parameters}&f_query_id=1066005&data=<?php+print+htmlentities($data);+?>&f_date_started={date_started}&f_date_ended={date_ended}&la_id=219&action=download&submit=Download+Data'
+        response = s.get(request_url)
+        with open('tmp-save.txt', 'w') as f:
+            f.write(response.text)
+        text = response.text
+        # # with open('tmp-save.txt', 'r') as f:
+        #     text = f.read()
+        print(text)
+        str_download = 'download='
+        str_csv = '.csv'
+        search_text = '.csv'
+        ind_d = text.find(str_download)
+        ind_csv = text[ind_d:].find(str_csv)
+
+        print(f"ind_d = {ind_d}")
+        print(f"ind_csv = {ind_csv}")
+        file_name = text[ind_d + 10:ind_d + ind_csv + 4]
+        print(file_name)
+        download_path = 'https://www.airqualityengland.co.uk/assets/downloads/' + file_name
+        data = urllib.request.urlopen(download_path).read()
+        print(data)
+
+
 def get_manchester_council_data():
     """ Function that downloads the data from Manchester measuring stations """
-    'https://www.airqualityengland.co.uk/site/data.php?site_id=TRAF&parameter_id%5B%5D=NO&parameter_id%5B%5D=NO2&parameter_id%5B%5D=NOXasNO2&parameter_id%5B%5D=GE10&parameter_id%5B%5D=SO2&f_query_id=1061759&data=%3C%3Fphp+print+htmlentities%28%24data%29%3B+%3F%3E&f_date_started=2019-01-01&f_date_ended=2019-05-01&la_id=368&action=download&submit=Download+Data'
+    midnight = datetime.datetime.combine(datetime.datetime.today(), datetime.datetime.min.time())
 
-    # csv download
-    # Generate file specifically for request - thats a bit disappointing
-    'https://www.airqualityengland.co.uk/assets/downloads/2019-01-01-190501090739.csv'
+    urls = ['https://uk-air.defra.gov.uk/data_files/site_data/MAN3_2019.csv',
+             'https://uk-air.defra.gov.uk/data_files/site_data/MAHG_2019.csv',
+             'https://uk-air.defra.gov.uk/data_files/site_data/ECCL_2019.csv']
 
-    # better use this service
-    'https://uk-air.defra.gov.uk/data/flat_files?site_id=MAN3' # piccadily
+    for url in urls:
+        ind = url.rfind('/')
+        save_name = os.path.join(data_folder, 'downloaded-%s_' % midnight.strftime('%Y%m%d') + url[ind+1:] + '.gz')
+
+        if os.path.exists(save_name):
+            logging.debug("%s exists, loading from file" % save_name)
+        else:
+            data = urllib.request.urlopen(url).read()
+
+            with gzip.open(save_name, 'w') as f:
+                f.write(data)
 
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    data = maybe_get_list_of_sensors()
-    print(type(data))
-    print(data[0])
+    # data = maybe_get_list_of_sensors()
+    # print(type(data))
+    # print(data[0])
+    get_manchester_council_data()
 
 
 if __name__ == '__main__':
