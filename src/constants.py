@@ -1,0 +1,7 @@
+start_date = 'Start date'
+end_date = 'End date'
+pm10 = 'PM 10'
+pm25 = 'PM 2.5'
+NO = 'NO'
+NO2 = 'NO2'
+NOXasNO = 'NOX as NO'
