@@ -7,20 +7,58 @@ import json
 import logging
 import gzip
 import glob
+import typing
+import math
 
+import urllib.error
 import urllib.request
 import requests
 import bs4
 
+import numpy as np
 import pandas as pd
 
 import src.constants as const
 
 data_folder = '..' + os.sep + 'data' + os.sep
 wait_time = 2  # seconds
-wait_time
 
-def maybe_get_list_of_sensors():
+
+def get_sensor_in_radius(latitude: float, longitude: float, distance: float) -> pd.DataFrame:
+    """ Returns all current sensors that are within `distance` [meters] of longitude and latitude
+
+    Could have used http://api.luftdaten.info/v1/filter/{query} instead but this is easier to cache
+    """
+
+    # helper function
+    def get_distance(lat1, lon1):
+        return np.abs(distance_between_two_points(lat1, lon1, lat2=latitude, lon2=longitude))
+
+    df = maybe_get_list_of_sensors()
+    df[const.distance] = get_distance(df[const.latitude], df[const.longitude])
+    return df[df[const.distance] < distance]
+
+
+def distance_between_two_points(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """ Calculate distance between to two points (https://en.wikipedia.org/wiki/Haversine_formula) """
+    # approximate radius of earth in m
+    r = 6373000.
+
+    lat1 = np.radians(lat1)
+    lon1 = np.radians(lon1)
+    lat2 = np.radians(lat2)
+    lon2 = np.radians(lon2)
+
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+    return r * c
+
+
+def maybe_get_list_of_sensors() -> pd.DataFrame:
     midnight = datetime.datetime.combine(datetime.datetime.today(), datetime.datetime.min.time())
     save_name = os.path.join(data_folder, 'data-%s.json.gz' % midnight.strftime('%Y%m%d'))
 
@@ -47,14 +85,112 @@ def maybe_get_list_of_sensors():
                     logging.warn("Failed to delete old file %s with error %s" % (file, str(err)))
 
     data = json.loads(data)
-    return data
+    return convert_json_data_to_df(data)
 
 
 def convert_json_data_to_df(data):
     """ Convert the JSON to a dataframe. For now, do this in an inefficient way but easy to code. """
-    dict_of_columns = {}
+    list_of_dicts = []
     for d in data:
-        pass
+        nd = {const.id: int(d[const.id]),
+              const.timestamp: d[const.timestamp],
+              const.longitude: float(d[const.location][const.longitude]),
+              const.latitude: float(d[const.location][const.latitude]),
+              const.indoor: bool(d[const.location][const.indoor]),
+              const.sensor_id: int(d[const.sensor][const.id]),
+              const.sensor_type_id: int(d[const.sensor][const.sensor_type][const.id]),
+              const.sensor_name: d[const.sensor][const.sensor_type][const.name]}
+        list_of_dicts.append(nd)
+    df = pd.DataFrame(list_of_dicts)
+    return df
+
+
+def daterange(start_date: datetime.datetime, end_date: datetime.datetime) -> typing.Iterable[datetime.datetime]:
+    """https://stackoverflow.com/questions/1060279/iterating-through-a-range-of-dates-in-python"""
+    for n in range(int((end_date - start_date).days)):
+        yield start_date + datetime.timedelta(n)
+
+
+def get_station_data_for_date_range(station_name: str, station_id: int, start_date: datetime.datetime,
+                                    end_date: datetime.datetime) -> pd.DataFrame:
+
+    df = None
+    for date in daterange(start_date, end_date):
+        logging.debug("Fetching %s" % str(date))
+        try:
+            tdf = maybe_get_station_data(station_name=station_name, station_id=station_id, date=date)
+            if df is None:
+                df = tdf
+            else:
+                df = pd.merge(left=df, right=tdf, on=list(df.columns), how='outer')
+        except urllib.error.HTTPError:
+            pass
+
+    return df
+
+
+def maybe_get_station_data(station_name: str, station_id: int, date: datetime.datetime) -> pd.DataFrame:
+    """ raise HTTPError (urllib.error.HTTPError) if data does not exist"""
+    date_str = date.strftime('%Y-%m-%d')
+    filename = "data-%s-%d-%s.csv" % (station_name, station_id, date_str)
+    save_name = os.path.join(data_folder, filename + '.gz')
+
+    if os.path.exists(save_name):
+        logging.debug("%s exists, loading from file" % save_name)
+        with gzip.open(save_name, 'r') as f:
+            data = f.read()
+    else:
+        logging.debug("Trying to download...")
+        time.sleep(wait_time)
+        url = 'https://www.madavi.de/sensor/data_csv/csv-files/%s/%s' % (date_str, filename)
+        data = urllib.request.urlopen(url).read()
+
+        with gzip.open(save_name, 'w') as f:
+            f.write(data)
+
+    return pd.read_csv(io.BytesIO(data), sep=';')
+
+
+def get_sensor_data_for_date_range(sensor_name: str, sensor_id: int, start_date: datetime.datetime,
+                                    end_date: datetime.datetime) -> pd.DataFrame:
+
+    df = None
+    for date in daterange(start_date, end_date):
+        logging.debug("Fetching %s" % str(date))
+        try:
+            tdf = maybe_get_sensor_data(sensor_name=sensor_name, sensor_id=sensor_id, date=date)
+            if df is None:
+                df = tdf
+            else:
+                df = pd.merge(left=df, right=tdf, on=list(df.columns), how='outer')
+        except urllib.error.HTTPError:
+            pass
+
+    return df
+
+
+def maybe_get_sensor_data(sensor_name: str, sensor_id: int, date: datetime.datetime) -> pd.DataFrame:
+    """ raise HTTPError (urllib.error.HTTPError) if data does not exist"""
+    date_str = date.strftime('%Y-%m-%d')
+    filename = "%s_%s_sensor_%d.csv" % (date_str, sensor_name, sensor_id)
+    save_name = os.path.join(data_folder, filename + '.gz')
+
+    if os.path.exists(save_name):
+        logging.debug("%s exists, loading from file" % save_name)
+        with gzip.open(save_name, 'r') as f:
+            data = f.read()
+    else:
+        logging.debug("Trying to download...")
+        time.sleep(wait_time)
+        url = 'http://archive.luftdaten.info/%s/%s' % (date_str, filename)
+        data = urllib.request.urlopen(url).read()
+
+        with gzip.open(save_name, 'w') as f:
+            f.write(data)
+
+    df = pd.read_csv(io.BytesIO(data), sep=';')
+    df[const.timestamp] = pd.to_datetime(df[const.timestamp])
+    return df
 
 
 def get_manchester_airqualityengland_data(start_date, end_date):
@@ -67,7 +203,6 @@ def get_manchester_airqualityengland_data(start_date, end_date):
 
     results_dic = {}
     for site in sites:
-        time.sleep(wait_time) # to prevent hammering the website too much
         print(f"doing site {site[0]}")
         results_dic[site[0]] = get_data_from_air_quality_england(site_id=site[0], parameters=site[1],
                                                                  start_date=start_date, end_date=end_date)
@@ -75,15 +210,8 @@ def get_manchester_airqualityengland_data(start_date, end_date):
 
 
 def get_data_from_air_quality_england(site_id: str, parameters: str, start_date: datetime.datetime, end_date: datetime.datetime):
-    """
-    https://www.airqualityengland.co.uk/site/data.php?site_id=MAN3&f_date_started=01/05/2019&f_date_ended=09/05/2019&f_query_id=1056749&la_id=219&action=step2&data=&submit=Next
-    https://www.airqualityengland.co.uk/site/data.php?site_id=MAN3&parameter_id[]=CO&parameter_id[]=NO&parameter_id[]=NO2&parameter_id[]=NOXasNO2&parameter_id[]=O3&parameter_id[]=GE10&parameter_id[]=PM25&parameter_id[]=SO2&parameter_id[]=M_T&parameter_id[]=M_DIR&parameter_id[]=M_SPED&f_query_id=1056749&data=<?php+print+htmlentities($data);+?>&f_date_started=2019-05-01&f_date_ended=2019-05-09&la_id=219&action=download&submit=Download+Data
-    :param site_id:
-    :param parameters:
-    :param start_date:
-    :param end_date:
-    :return:
-    """
+    """ Fetch data from www.airqualityengland.co.uk """
+
     base_url = 'https://www.airqualityengland.co.uk/site/data.php?site_id=%s' % site_id
     date_started = start_date.strftime('%Y-%m-%d')
     date_ended = end_date.strftime('%Y-%m-%d')
@@ -96,8 +224,8 @@ def get_data_from_air_quality_england(site_id: str, parameters: str, start_date:
             data = f.read()
     else:
         print(f"trying to fetch site {site_id}")
+        time.sleep(wait_time) # to prevent hammering the website too much
 
-        # https://www.airqualityengland.co.uk/site/data.php?site_id=MAN3&parameter_id%5B%5D=CO&parameter_id%5B%5D=NO&parameter_id%5B%5D=NO2&parameter_id%5B%5D=NOXasNO2&parameter_id%5B%5D=O3&parameter_id%5B%5D=GE10&parameter_id%5B%5D=PM25&parameter_id%5B%5D=SO2&parameter_id%5B%5D=M_T&parameter_id%5B%5D=M_DIR&parameter_id%5B%5D=M_SPED&f_query_id=1056379&data=%3C%3Fphp+print+htmlentities%28%24data%29%3B+%3F%3E&f_date_started=2019-05-01&f_date_ended=2019-05-09&la_id=219&action=download&submit=Download+Data
         request_url = f'https://www.airqualityengland.co.uk/site/data.php?site_id={site_id}&{parameters}&f_query_id=1066005&data=<?php+print+htmlentities($data);+?>&f_date_started={date_started}&f_date_ended={date_ended}&la_id=219&action=download&submit=Download+Data'
         print(f"request_url = {request_url}")
         with requests.Session() as s:
@@ -114,6 +242,7 @@ def get_data_from_air_quality_england(site_id: str, parameters: str, start_date:
             response = s.get(request_url)
             text = response.text
 
+            #TODO: do this with bs4
             str_download = 'download='
             str_csv = '.csv'
             ind_d = text.find(str_download)
@@ -133,6 +262,22 @@ def get_data_from_air_quality_england(site_id: str, parameters: str, start_date:
 def _convert_air_quality_england_to_dataframe(data):
     df = pd.read_csv(io.BytesIO(data), skiprows=5, skipfooter=1, engine='python')
 
+    for ii, d_str in enumerate(df['End Date']):
+        # TODO: use extra data we are getting!
+        # TODO: very inefficient test
+        try:
+            datetime.datetime.strptime(d_str, '%d/%m/%Y')
+        except:
+            logging.warn("%s not date - probably some additional data in datafram that we are ignoring" % d_str)
+            df = df.iloc[:ii]
+            break
+
+    df = fix_df(df)
+
+    return df
+
+
+def fix_df(df: pd.DataFrame) -> pd.DataFrame:
     # End hour can be 24 which is rejected by python datetime
     # Therefore we need to hack the time
     df[const.start_date] = pd.to_datetime(df['End Date'] + df['End Time'].apply(_hack_end_time_to_start_time),
@@ -175,13 +320,31 @@ def get_manchester_council_data():
 def main():
     logging.basicConfig(level=logging.DEBUG)
     # data = maybe_get_list_of_sensors()
-    # print(type(data))
-    # print(data[0])
+    # print(data.columns)
+    # print(data.dtypes)
+
+    # df = get_sensor_in_radius(longitude=-2.245278, latitude=53.479444, distance=6e3)
+    # print(df[[const.sensor_id, const.distance]])
+    # print(distance_between_two_points(52.2296756, 21.0122287, 52.406374,16.9251681))
+
     # get_manchester_council_data()
-    ed = datetime.datetime.now()
-    sd = ed - datetime.timedelta(2)
-    rslt_dic = get_manchester_airqualityengland_data(start_date=sd, end_date=ed)
-    print(rslt_dic)
+
+    # ed = datetime.datetime.now() - datetime.timedelta(1)
+    # sd = ed - datetime.timedelta(2)
+    # rslt_dic = get_manchester_airqualityengland_data(start_date=sd, end_date=ed)
+    # print(rslt_dic)
+
+    # df = maybe_get_station_data(station_name='esp8266', station_id=1027161, date=datetime.datetime.now() - datetime.timedelta(1))
+
+    # df = get_station_data_for_date_range(station_name='esp8266', station_id=1027161,
+    #                                      start_date=datetime.datetime.now() - datetime.timedelta(3),
+    #                                      end_date=datetime.datetime.now() - datetime.timedelta(1))
+    # df = maybe_get_sensor_data(sensor_name='dht22', sensor_id=13312, date=datetime.datetime.now() - datetime.timedelta(3))
+    df = get_sensor_data_for_date_range(sensor_name='dht22', sensor_id=13312,
+                                        start_date=datetime.datetime.now() - datetime.timedelta(3),
+                                        end_date=datetime.datetime.now() - datetime.timedelta(1))
+    print(df.head())
+    print(df.columns)
 
 
 if __name__ == '__main__':
