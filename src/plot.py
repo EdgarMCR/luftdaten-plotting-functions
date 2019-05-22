@@ -49,7 +49,7 @@ def get_sensors_around_chorlton():
 
 def plot_official_data():
     ed = datetime.datetime.now() - datetime.timedelta(1)
-    sd = ed - datetime.timedelta(6)
+    sd = ed - datetime.timedelta(30)
     rslt_dic = gd.get_manchester_airqualityengland_data(start_date=sd, end_date=ed)
 
     for variable in [const.pm10, const.NO, const.NO2]:
@@ -68,8 +68,8 @@ def plot_official_data():
 
 
 def main():
-    # plot_official_data()
-    get_sensors_around_chorlton()
+    plot_official_data()
+    # get_sensors_around_chorlton()
 
 
 if __name__ == "__main__":

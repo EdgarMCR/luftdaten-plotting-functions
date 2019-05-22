@@ -268,7 +268,7 @@ def _convert_air_quality_england_to_dataframe(data):
         try:
             datetime.datetime.strptime(d_str, '%d/%m/%Y')
         except:
-            logging.warn("%s not date - probably some additional data in datafram that we are ignoring" % d_str)
+            logging.warn("`%s` not date - probably some additional data in datafram that we are ignoring" % d_str)
             df = df.iloc[:ii]
             break
 
@@ -300,9 +300,8 @@ def get_manchester_council_data():
     """ Function that downloads the data from Manchester measuring stations """
     midnight = datetime.datetime.combine(datetime.datetime.today(), datetime.datetime.min.time())
 
-    urls = ['https://uk-air.defra.gov.uk/data_files/site_data/MAN3_2019.csv',
-             'https://uk-air.defra.gov.uk/data_files/site_data/MAHG_2019.csv',
-             'https://uk-air.defra.gov.uk/data_files/site_data/ECCL_2019.csv']
+    base_url = 'https://uk-air.defra.gov.uk/data_files/site_data/'
+    urls = [base_url + 'MAN3_2019.csv', base_url + 'MAHG_2019.csv', base_url + 'ECCL_2019.csv']
 
     for url in urls:
         ind = url.rfind('/')
